@@ -162,50 +162,93 @@ fn move_or_copy(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result
     Ok(())
 }
 
+const STEAMCMD_BYTES: &[u8] = include_bytes!("../bin/steamcmd-x86_64-pc-windows-msvc.exe");
+
 fn spawn_worker(app: AppHandle) {
     let state = app.state::<QueueState>();
     let queue = state.queue.clone();
     let app_handle = app.clone();
 
-    thread::spawn(move || {
-        loop {
-            let mut current_item: Option<DownloadItem> = None;
+    thread::spawn(move || loop {
+        let mut current_item: Option<DownloadItem> = None;
 
+        {
+            let mut q = queue.lock().unwrap();
+            if let Some(index) = q
+                .iter()
+                .position(|i| matches!(i.status, DownloadStatus::Pending))
             {
-                let mut q = queue.lock().unwrap();
-                if let Some(index) = q
-                    .iter()
-                    .position(|i| matches!(i.status, DownloadStatus::Pending))
-                {
-                    q[index].status = DownloadStatus::Downloading;
-                    current_item = Some(q[index].clone());
+                q[index].status = DownloadStatus::Downloading;
+                current_item = Some(q[index].clone());
+            }
+        }
+
+        if let Some(item) = current_item {
+            let _ = app_handle.emit("queue-update", ());
+
+            let cwd = std::env::current_dir().unwrap();
+            let mut final_status = DownloadStatus::Pending;
+            let mut executable_path = std::path::PathBuf::new();
+
+            let possible_paths = [
+                app_handle
+                    .path()
+                    .resource_dir()
+                    .ok()
+                    .map(|p| p.join("bin/steamcmd.exe")),
+                std::env::current_exe()
+                    .ok()
+                    .map(|p| p.parent().unwrap().join("steamcmd.exe")),
+                Some(cwd.join("steamcmd.exe")),
+                cwd.parent().map(|p| p.join("steamcmd.exe")),
+                Some(cwd.join("bin/steamcmd-x86_64-pc-windows-msvc.exe")),
+                cwd.parent()
+                    .map(|p| p.join("src-tauri/bin/steamcmd-x86_64-pc-windows-msvc.exe")),
+            ];
+
+            for opt_path in &possible_paths {
+                if let Some(p) = opt_path {
+                    if p.exists() {
+                        executable_path = p.clone();
+                        break;
+                    }
                 }
             }
 
-            if let Some(item) = current_item {
-                let _ = app_handle.emit("queue-update", ());
+            if executable_path.as_os_str().is_empty() {
+                let app_data = app_handle.path().app_data_dir().unwrap_or(cwd.clone());
+                let engine_dir = app_data.join("engine");
+                let steamcmd_in_appdata = engine_dir.join("steamcmd.exe");
 
-                let cwd = std::env::current_dir().unwrap();
-                let executable_path = if cwd.ends_with("src-tauri") {
-                    cwd.parent().unwrap().join("steamcmd.exe")
-                } else {
-                    cwd.join("steamcmd.exe")
-                };
+                let _ = fs::create_dir_all(&engine_dir);
+                match fs::write(&steamcmd_in_appdata, STEAMCMD_BYTES) {
+                    Ok(_) => executable_path = steamcmd_in_appdata,
+                    Err(e) => {
+                        let mut err_msg = format!(
+                            "SteamCMD not found and extraction failed: {}\nChecked: \n",
+                            e
+                        );
+                        for p in possible_paths.iter().flatten() {
+                            err_msg.push_str(&format!("- {:?}\n", p));
+                        }
+                        final_status = DownloadStatus::Failed(err_msg);
+                    }
+                }
+            }
 
+            if !executable_path.as_os_str().is_empty() {
                 let (real_id, game_id) = if let Some((g, f)) = item.steam_id.split_once(':') {
                     (f, Some(g))
                 } else {
                     (item.steam_id.as_str(), None)
                 };
 
-                // Temp install dir: download/ID
                 let root_dl = if cwd.ends_with("src-tauri") {
                     cwd.parent().unwrap().join("download")
                 } else {
                     cwd.join("download")
                 };
                 let temp_install_dir = root_dl.join(real_id);
-
                 let sanitized_name = sanitize(&item.name);
                 let final_install_dir = root_dl.join(&sanitized_name);
 
@@ -216,8 +259,7 @@ fn spawn_worker(app: AppHandle) {
                     game_id,
                 );
 
-                // If success, move contents
-                let final_status = match result {
+                final_status = match result {
                     Ok(_) => {
                         thread::sleep(Duration::from_secs(2));
 
@@ -228,46 +270,26 @@ fn spawn_worker(app: AppHandle) {
                                 .join(real_id);
 
                             if deep_path.exists() {
-                                // Ensure final dir exists
-                                if let Err(_) = fs::create_dir_all(&final_install_dir) {
-                                    // ignore
-                                }
+                                let _ = fs::create_dir_all(&final_install_dir);
 
-                                // Move contents
-                                match fs::read_dir(&deep_path) {
-                                    Ok(entries) => {
-                                        for entry in entries {
-                                            if let Ok(entry) = entry {
-                                                let file_name = entry.file_name();
-
-                                                if file_name == "mods" && entry.path().is_dir() {
-                                                    if let Ok(mod_entries) =
-                                                        fs::read_dir(entry.path())
-                                                    {
-                                                        for mod_entry in mod_entries {
-                                                            if let Ok(mod_entry) = mod_entry {
-                                                                let dest = final_install_dir
-                                                                    .join(mod_entry.file_name());
-                                                                let _ = move_or_copy(
-                                                                    &mod_entry.path(),
-                                                                    &dest,
-                                                                );
-                                                            }
-                                                        }
-                                                    }
-                                                } else {
-                                                    let dest = final_install_dir.join(&file_name);
-                                                    let _ = move_or_copy(&entry.path(), &dest);
+                                if let Ok(entries) = fs::read_dir(&deep_path) {
+                                    for entry in entries.flatten() {
+                                        let file_name = entry.file_name();
+                                        if file_name == "mods" && entry.path().is_dir() {
+                                            if let Ok(mod_entries) = fs::read_dir(entry.path()) {
+                                                for mod_entry in mod_entries.flatten() {
+                                                    let dest = final_install_dir
+                                                        .join(mod_entry.file_name());
+                                                    let _ = move_or_copy(&mod_entry.path(), &dest);
                                                 }
                                             }
+                                        } else {
+                                            let dest = final_install_dir.join(&file_name);
+                                            let _ = move_or_copy(&entry.path(), &dest);
                                         }
                                     }
-                                    Err(_) => {}
                                 }
-
-                                // Cleanup temp
                                 let _ = fs::remove_dir_all(&temp_install_dir);
-
                                 DownloadStatus::Completed
                             } else {
                                 DownloadStatus::Completed
@@ -278,27 +300,28 @@ fn spawn_worker(app: AppHandle) {
                     }
                     Err(e) => DownloadStatus::Failed(e),
                 };
+            }
 
-                {
-                    let mut q = queue.lock().unwrap();
-                    if let Some(index) = q.iter().position(|i| i.id == item.id) {
-                        q[index].status = final_status.clone();
-                        if matches!(final_status, DownloadStatus::Completed) {
-                            if game_id.is_some() {
-                                q[index].install_path =
-                                    Some(final_install_dir.to_string_lossy().to_string());
-                            } else {
-                                q[index].install_path =
-                                    Some(temp_install_dir.to_string_lossy().to_string());
-                            }
-                        }
+            {
+                let mut q = queue.lock().unwrap();
+                if let Some(index) = q.iter().position(|i| i.id == item.id) {
+                    q[index].status = final_status.clone();
+                    if matches!(final_status, DownloadStatus::Completed) {
+                        let root_dl = if cwd.ends_with("src-tauri") {
+                            cwd.parent().unwrap().join("download")
+                        } else {
+                            cwd.join("download")
+                        };
+                        let sanitized_name = sanitize(&item.name);
+                        let final_path = root_dl.join(&sanitized_name);
+                        q[index].install_path = Some(final_path.to_string_lossy().to_string());
                     }
                 }
-
-                let _ = app_handle.emit("queue-update", ());
-            } else {
-                thread::sleep(Duration::from_secs(1));
             }
+
+            let _ = app_handle.emit("queue-update", ());
+        } else {
+            thread::sleep(Duration::from_secs(1));
         }
     });
 }
