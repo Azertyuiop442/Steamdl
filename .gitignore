@@ -1,0 +1,43 @@
+# Rust
+/target
+Cargo.lock
+
+# Node
+node_modules
+dist/
+dist-ssr/
+.DS_Store
+*.local
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/bin/*
+!src-tauri/bin/steamcmd-x86_64-pc-windows-msvc.exe
+
+# Project Specific / Steam Artifacts
+download/
+src-tauri/download/
+logs/
+*.log
+steam.log
+runscript.txt
+steamcmd.exe
+steamcmd.zip
+appcache/
+bin/
+config/
+depotcache/
+userdata/
+siteserverui/
+package/
+public/steambootstrapper_french.txt
+
+# AI & Tooling
+.agent/
+.gemini/
+.vscode/
+specs/
+walkthrough.md
+implementation_plan.md
+task.md
