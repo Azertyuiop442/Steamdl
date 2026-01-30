@@ -41,3 +41,8 @@ specs/
 walkthrough.md
 implementation_plan.md
 task.md
+AGENTS.md
+
+# Scripts & CI
+scripts/
+.github/workflows/

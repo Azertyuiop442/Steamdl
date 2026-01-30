@@ -1,8 +1,13 @@
+import { useState } from "react";
 import "./App.css";
-import { AddDownload } from "./components/AddDownload";
-import { QueueList } from "./components/QueueList";
+import { DownloadTab } from "./components/DownloadTab";
+import { HistoryTab } from "./components/HistoryTab";
+
+type Tab = "download" | "history";
 
 function App() {
+  const [activeTab, setActiveTab] = useState<Tab>("download");
+
   return (
     <div className="container">
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -12,35 +17,42 @@ function App() {
             Rust-powered SteamCMD GUI
           </p>
         </div>
-        <div style={{ display: "flex", gap: "10px" }}>
-          {/* Status indicators could go here */}
-          <span style={{ fontSize: "0.75rem", padding: "4px 8px", background: "var(--muted)", borderRadius: "var(--radius)", color: "var(--muted-foreground)" }}>
-            v0.1.0
-          </span>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          {/* Navigation Tabs */}
+          <div className="tabs-container" style={{ display: "flex", background: "var(--card)", padding: "4px", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
+             <button
+                className={`btn tab-btn`}
+                style={{ 
+                    height: "2rem", 
+                    backgroundColor: activeTab === "download" ? "var(--primary)" : "transparent",
+                    color: activeTab === "download" ? "var(--primary-foreground)" : "var(--muted-foreground)" 
+                }}
+                onClick={() => setActiveTab("download")}
+             >
+               Downloads
+             </button>
+             <button
+                className={`btn tab-btn`}
+                style={{ 
+                    height: "2rem", 
+                    backgroundColor: activeTab === "history" ? "var(--primary)" : "transparent",
+                    color: activeTab === "history" ? "var(--primary-foreground)" : "var(--muted-foreground)" 
+                }}
+                onClick={() => setActiveTab("history")}
+             >
+               History
+             </button>
+           </div>
+
+           <span className="version-badge" style={{ fontSize: "0.75rem", padding: "4px 8px", background: "var(--muted)", borderRadius: "var(--radius)", color: "var(--muted-foreground)" }}>
+             v0.1.1
+           </span>
         </div>
       </header>
 
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "300px 1fr",
-        gap: "1.5rem",
-        flex: 1,
-        minHeight: 0
-      }}>
-        <aside style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          <AddDownload />
-          {/* Future: Settings, History, etc. accessible here */}
-        </aside>
-
-        <main className="card" style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div className="card-header">
-            <h2 className="card-title">Downloads</h2>
-            <p className="card-description">Manage and monitor your active content queue.</p>
-          </div>
-          <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-            <QueueList />
-          </div>
-        </main>
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+        {activeTab === "download" && <DownloadTab />}
+        {activeTab === "history" && <HistoryTab />}
       </div>
     </div>
   );
