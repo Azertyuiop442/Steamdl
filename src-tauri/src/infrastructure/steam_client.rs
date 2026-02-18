@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter};
 pub fn execute_steamcmd_with_progress(
     app: &AppHandle,
     commands: Vec<String>,
-    process_manager: &ProcessManager,
+    _process_manager: &ProcessManager,
     item_id: String,
 ) -> Result<mpsc::Receiver<bool>, String> {
     let steamcmd_path = get_steamcmd_path(app)?;
