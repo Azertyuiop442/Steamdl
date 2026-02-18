@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter};
 pub fn execute_steamcmd_with_progress(
     app: &AppHandle,
     commands: Vec<String>,
-    _process_manager: &ProcessManager,
+    process_manager: &ProcessManager,
     item_id: String,
 ) -> Result<mpsc::Receiver<bool>, String> {
     let steamcmd_path = get_steamcmd_path(app)?;
@@ -77,9 +77,14 @@ pub fn execute_steamcmd_with_progress(
     });
 
     let (tx, rx) = mpsc::channel();
-
+    let pid = child.id();
+    let processes = process_manager.processes.clone();
+    
     thread::spawn(move || {
         let success = child.wait().map(|s| s.success()).unwrap_or(false);
+        if let Ok(mut procs) = processes.lock() {
+            procs.retain(|p| p.id() != pid);
+        }
         let _ = tx.send(success);
     });
 
