@@ -34,14 +34,15 @@ pub fn execute_steamcmd_with_progress(
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
-    let _app_clone = app.clone();
-    let _item_id_clone = item_id.clone();
     thread::spawn(move || {
         let mut writer = stdin;
         for command in commands {
             let _ = writeln!(writer, "{}", command);
+            let _ = writer.flush();
         }
         let _ = writeln!(writer, "quit");
+        let _ = writer.flush();
+        drop(writer);
     });
 
     let app_out = app.clone();
@@ -76,29 +77,13 @@ pub fn execute_steamcmd_with_progress(
     });
 
     let (tx, rx) = mpsc::channel();
-    let processes_clone = process_manager.processes.clone();
 
-    if let Ok(mut procs) = process_manager.processes.lock() {
-        procs.push(child);
-        let idx = procs.len() - 1;
+    thread::spawn(move || {
+        let success = child.wait().map(|s| s.success()).unwrap_or(false);
+        let _ = tx.send(success);
+    });
 
-        thread::spawn(move || {
-            let success = if let Ok(mut p) = processes_clone.lock() {
-                if let Some(child) = p.get_mut(idx) {
-                    child.wait().map(|s| s.success()).unwrap_or(false)
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-            let _ = tx.send(success);
-        });
-
-        return Ok(rx);
-    }
-
-    Err("Failed to lock process list".to_string())
+    Ok(rx)
 }
 
 fn parse_progress(line: &str) -> Option<f32> {
